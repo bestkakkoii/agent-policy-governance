@@ -1,5 +1,5 @@
 # agents
-Snapshot: 08cba5b9a39218449c769d90644644cf7f6d11973a96b08f0fdb30d38535d13d
+Snapshot: 6575834e2f9560f90defb39cad9e2e2e0dd013a1ce73c2d7af47378826e6e33a
 
 ## owner.documentation
 Strength: required; scope: []
@@ -13,8 +13,8 @@ Do not force a new agent/team for every task. The main agent integrates consiste
 
 ## owner.evolution
 Strength: required; scope: []
-Improve replaceable policies when reliable evidence supports the change, after independent risk-proportionate agent review under the previous policy.
-No self-approval, core-boundary changes or invented evidence. Claims of performance/security/correctness need evidence appropriate to the claim. A snapshot changes only at a safe task boundary; harmful changes require independent recovery review.
+Improve replaceable policies using reliable facts or theory-supported expected advantages, after independent risk-proportionate agent review. Published algorithms, new concepts and experimental technologies qualify without a prior measured win.
+For theory evidence, record the primary source, comparison baseline, assumptions and task applicability. The reviewer checks the reasoning, not a nonexistent benchmark. Do not self-approve, alter core boundaries or fabricate evidence. Empirical performance claims still need measured artifacts; theoretical benefits remain explicitly unverified in the target environment. Required compatibility/correctness/security checks and safe-boundary activation remain; harmful changes require independent recovery review.
 
 ## owner.privacy
 Strength: required; scope: []

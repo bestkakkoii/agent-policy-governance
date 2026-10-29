@@ -1,10 +1,10 @@
 # performance
-Snapshot: 08cba5b9a39218449c769d90644644cf7f6d11973a96b08f0fdb30d38535d13d
+Snapshot: 6575834e2f9560f90defb39cad9e2e2e0dd013a1ce73c2d7af47378826e6e33a
 
 ## owner.performance
 Strength: required; scope: []
-Preserve correctness and recoverability, remove useless work, then optimize latency, throughput and footprint with measurements.
-Separate instrumented/verification builds from release builds; never trade safety for undefined behavior or unbounded queues.
+Preserve correctness and recoverability, remove useless work, and adopt theoretically better new algorithms or designs when credible reasoning fits the workload; do not require measured superiority before selection.
+State assumptions and expected gains separately from observations. Claims of actual latency, throughput or footprint improvement require measurements. Perform risk-relevant correctness/security validation; separate instrumented and release builds. Never trade safety for undefined behavior or unbounded queues.
 
 ## R03
 Strength: reference; scope: ["game"]

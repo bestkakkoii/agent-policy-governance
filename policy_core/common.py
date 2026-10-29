@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-version = "0.2.0"
+version = "0.2.1"
 max_json_bytes = 8 * 1024 * 1024
 
 

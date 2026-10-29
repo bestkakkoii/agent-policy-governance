@@ -9,6 +9,7 @@
       "owner.communication",
       "owner.context",
       "owner.evidence",
+      "owner.latest",
       "owner.scope"
     ]
   },
@@ -27,6 +28,7 @@
       "owner.diagnostics",
       "owner.encoding",
       "owner.evidence",
+      "owner.latest",
       "owner.naming",
       "owner.risk_tests",
       "owner.scope",
@@ -77,6 +79,7 @@
       "owner.context",
       "owner.desktop_stack",
       "owner.evidence",
+      "owner.latest",
       "owner.scope"
     ]
   },
@@ -95,6 +98,7 @@
       "owner.communication",
       "owner.context",
       "owner.evidence",
+      "owner.latest",
       "owner.performance",
       "owner.scope",
       "R02",
@@ -125,6 +129,7 @@
       "owner.cpp_modules",
       "owner.cpp_style",
       "owner.evidence",
+      "owner.latest",
       "owner.qt",
       "owner.scope",
       "owner.toolchains"
@@ -146,6 +151,7 @@
       "owner.documentation",
       "owner.evidence",
       "owner.evolution",
+      "owner.latest",
       "owner.privacy",
       "owner.release_defense",
       "owner.scope"

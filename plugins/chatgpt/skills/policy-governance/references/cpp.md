@@ -1,5 +1,5 @@
 # cpp
-Snapshot: 08cba5b9a39218449c769d90644644cf7f6d11973a96b08f0fdb30d38535d13d
+Snapshot: 6575834e2f9560f90defb39cad9e2e2e0dd013a1ce73c2d7af47378826e6e33a
 
 ## owner.toolchains
 Strength: required; scope: []
@@ -8,8 +8,8 @@ This overrides older whitepaper wording that could force a new toolchain. Use of
 
 ## owner.cpp_modules
 Strength: required; scope: ["cpp"]
-Owned C++ core/interfaces require C++26 or a newer usable standard and named Modules/import, with real toolchain-qualified import std.
-Use the latest supported/experimental mode in existing tools. SDK/third-party/non-module boundaries may use includes. No fabricated std module, old-standard fallback or forced compiler install.
+All owned C++ core and interfaces require C++26 or a newer usable standard, including the latest available experimental mode, and a real named Modules/import/export architecture with toolchain-provided import std;.
+Use export module module_name; for module interface units, export only intended public declarations, import module_name; at consumers, and module module_name; for implementation units. Separate public declarations and implementation definitions where practical; keep justified template/inline definitions in interfaces or appropriate partitions. Use the real standard-library module, never a fabricated stdmodule shim. Includes are limited to necessary SDK, third-party and non-module boundaries, not an alternate owned-core header architecture. Use the newest compatible installed compiler/SDK mode. Missing C++26, named-module or standard-library-module support is a blocker, not permission to downgrade or force a large toolchain installation.
 
 ## owner.cpp_style
 Strength: required; scope: ["cpp"]

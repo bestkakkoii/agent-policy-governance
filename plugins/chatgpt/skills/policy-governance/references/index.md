@@ -1,7 +1,7 @@
 # Pinned policy references
-Snapshot: `08cba5b9a39218449c769d90644644cf7f6d11973a96b08f0fdb30d38535d13d`.
+Snapshot: `6575834e2f9560f90defb39cad9e2e2e0dd013a1ce73c2d7af47378826e6e33a`.
 Read common.md first, then only needed topic files. Do not read every file. Scope still applies.
-- common.md: owner.scope, owner.evidence, owner.autonomy, owner.context, owner.communication
+- common.md: owner.scope, owner.evidence, owner.autonomy, owner.context, owner.communication, owner.latest, owner.cpp_modules
 - agents.md: owner.documentation, owner.agents, owner.evolution, owner.privacy, R21
 - assets.md: R02, R45
 - control_api.md: R29, R30, R62, R63, R64, R65, R66, R67, R68, R70

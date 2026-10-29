@@ -14,12 +14,20 @@ from .runtime import policy_runtime
 def validate_evidence(items: Any) -> None:
     require(isinstance(items, list) and 0 < len(items) <= 32, "evidence_required", "Provide bounded reliable evidence")
     for item in items:
-        require(isinstance(item, dict) and set(item) == {"url", "observed_on", "claim", "kind", "artifact_sha256"},
-                "evidence_shape", "Evidence needs url, observed_on, claim, kind, artifact_sha256")
+        require(isinstance(item, dict), "evidence_shape", "Evidence must be an object")
+        fields = {"url", "observed_on", "claim", "kind", "artifact_sha256"}
+        theory_fields = {"baseline", "assumptions", "applicability"}
+        if item.get("kind") == "theory":
+            fields |= theory_fields
+        require(set(item) == fields, "evidence_shape", "Missing or unexpected evidence fields", expected=sorted(fields))
+        if item.get("kind") == "theory":
+            for field in sorted(theory_fields):
+                require(isinstance(item[field], str) and 1 <= len(item[field].strip()) <= 4000,
+                        "theory_reasoning", "Theory requires a comparison baseline, assumptions and task applicability", field=field)
         url = urllib.parse.urlsplit(item["url"])
         require(url.scheme == "https" and bool(url.hostname) and not url.username and not url.password,
                 "evidence_url", "Evidence must use a non-credentialed HTTPS source URL")
-        require(item["kind"] in {"fact", "compatibility", "performance", "security"}, "evidence_kind", "Unknown evidence kind")
+        require(item["kind"] in {"fact", "compatibility", "performance", "security", "theory"}, "evidence_kind", "Unknown evidence kind")
         require(isinstance(item["claim"], str) and 12 <= len(item["claim"]) <= 4000, "evidence_claim", "State a concrete, supported claim")
         date = datetime.date.fromisoformat(item["observed_on"])
         require(date <= datetime.datetime.now(datetime.UTC).date(), "evidence_future", "Evidence observation cannot be future dated")

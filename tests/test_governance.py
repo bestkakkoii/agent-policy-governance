@@ -34,7 +34,8 @@ class governance_tests(unittest.TestCase):
 
     def candidate(self) -> dict:
         value = copy.deepcopy(load_catalog())
-        value["payload"]["version"] = "0.2.1"
+        major, minor, patch_version = map(int, value["payload"]["version"].split("."))
+        value["payload"]["version"] = f"{major}.{minor}.{patch_version + 1}"
         next(rule for rule in value["payload"]["rules"] if rule["rule_id"] == "owner.latest")["details"] += " Compare upstream support explicitly."
         value["snapshot_id"] = digest(value["payload"])
         return value

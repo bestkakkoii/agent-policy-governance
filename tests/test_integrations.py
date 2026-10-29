@@ -113,7 +113,8 @@ class integration_tests(unittest.TestCase):
         import copy
         from policy_core.common import digest
         candidate = copy.deepcopy(load_catalog())
-        candidate["payload"]["version"] = "0.2.1"
+        major, minor, patch_version = map(int, candidate["payload"]["version"].split("."))
+        candidate["payload"]["version"] = f"{major}.{minor}.{patch_version + 1}"
         candidate["snapshot_id"] = digest(candidate["payload"])
         write_json(self.home / "sync_settings.json", {"enabled": True})
         responses = [io.BytesIO(b"a" * 40), io.BytesIO(canonical(candidate))]

@@ -1,5 +1,5 @@
 # desktop_gui
-Snapshot: 08cba5b9a39218449c769d90644644cf7f6d11973a96b08f0fdb30d38535d13d
+Snapshot: 6575834e2f9560f90defb39cad9e2e2e0dd013a1ce73c2d7af47378826e6e33a
 
 ## owner.desktop_stack
 Strength: required; scope: ["desktop_gui"]

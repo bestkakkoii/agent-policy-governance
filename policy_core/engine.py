@@ -97,7 +97,8 @@ def discover_profile(project: Path) -> dict[str, Any]:
             evidence.append(name)
     entries = sorted(project.iterdir(), key=lambda path: path.name)[:512]
     extension_tags = {".py": "python", ".rs": "rust", ".go": "go", ".csproj": "csharp",
-                      ".sln": "csharp", ".cpp": "cpp", ".cppm": "cpp", ".java": "java", ".uproject": "game"}
+                      ".sln": "csharp", ".cpp": "cpp", ".cppm": "cpp", ".ixx": "cpp", ".mpp": "cpp",
+                      ".cc": "cpp", ".cxx": "cpp", ".vcxproj": "cpp", ".java": "java", ".uproject": "game"}
     for path in entries:
         if path.is_file() and not path.is_symlink() and path.suffix in extension_tags:
             tags.add(extension_tags[path.suffix])
@@ -115,7 +116,7 @@ def infer_topics(text: str) -> list[str]:
         "requirements": ["requirements", "需求", "design", "設計", "architecture", "架構"],
         "quality": ["test", "check", "verify", "build", "lint", "測試", "驗證", "編譯", "檢查"],
         "naming": ["write", "edit", "patch", "implement", "rename", "實作", "命名", "修改"],
-        "dependencies": ["library", "package", "dependency", "upgrade", "version", "函式庫", "技術", "升級", "依賴", "最新"],
+        "dependencies": ["library", "package", "dependency", "upgrade", "version", "algorithm", "concept", "paper", "preprint", "experimental", "函式庫", "技術", "升級", "依賴", "最新", "演算法", "算法", "概念", "論文", "實驗性"],
         "network": ["network", "http", "tls", "quic", "socket", "封包", "網路", "協定"],
         "desktop_gui": ["desktop", "gui", "wails", "tauri", "saucer", "桌面", "介面"],
         "rendering": ["render", "gpu", "fps", "shader", "graphics", "繪圖", "渲染", "畫質"],

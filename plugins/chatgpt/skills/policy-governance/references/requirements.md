@@ -1,5 +1,5 @@
 # requirements
-Snapshot: 08cba5b9a39218449c769d90644644cf7f6d11973a96b08f0fdb30d38535d13d
+Snapshot: 6575834e2f9560f90defb39cad9e2e2e0dd013a1ce73c2d7af47378826e6e33a
 
 ## owner.requirements
 Strength: required; scope: []
@@ -8,8 +8,8 @@ Do not let interview machinery replace completing an authorized task.
 
 ## owner.latest
 Strength: required; scope: []
-Research currently public, legally obtainable and actually supported technologies, including previews and experiments. Newer is not proof of faster or safer.
-Use official documentation/upstream source and verification; do not invent versions or treat historical observations as current facts.
+Prefer and adopt the newest publicly released or published technologies, algorithms and concepts when reliable primary evidence and explicit reasoning support a theoretical advantage for the actual task; measured superiority is not an adoption prerequisite.
+Include previews, experimental implementations, research papers, preprints and emerging designs, not just library versions. Do not wait for stability labels, popularity or mature benchmarks. Check publication/source identity, assumptions and applicability; implement a published idea when feasible rather than inventing an existing API. Preserve installed-large-toolchain limits, legal access, hard requirements and necessary correctness/security checks. Label expected benefits as theoretical until measured; record and pin available versions/commits for each run.
 
 ## owner.architecture
 Strength: required; scope: []
@@ -28,8 +28,8 @@ Use latest supported installed/environment-qualified versions. React+TypeScript 
 
 ## owner.cpp_modules
 Strength: required; scope: ["cpp"]
-Owned C++ core/interfaces require C++26 or a newer usable standard and named Modules/import, with real toolchain-qualified import std.
-Use the latest supported/experimental mode in existing tools. SDK/third-party/non-module boundaries may use includes. No fabricated std module, old-standard fallback or forced compiler install.
+All owned C++ core and interfaces require C++26 or a newer usable standard, including the latest available experimental mode, and a real named Modules/import/export architecture with toolchain-provided import std;.
+Use export module module_name; for module interface units, export only intended public declarations, import module_name; at consumers, and module module_name; for implementation units. Separate public declarations and implementation definitions where practical; keep justified template/inline definitions in interfaces or appropriate partitions. Use the real standard-library module, never a fabricated stdmodule shim. Includes are limited to necessary SDK, third-party and non-module boundaries, not an alternate owned-core header architecture. Use the newest compatible installed compiler/SDK mode. Missing C++26, named-module or standard-library-module support is a blocker, not permission to downgrade or force a large toolchain installation.
 
 ## owner.reuse
 Strength: required; scope: []

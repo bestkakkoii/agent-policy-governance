@@ -103,3 +103,14 @@ test("remote selector matches the Python conformance vector", async () => {
     assert.deepEqual(packet.rules.map((rule) => rule.rule_id), vector.rule_ids);
   }
 });
+
+// Verify public policy transport, not native C++ build or research truth.
+test("owner amendment reaches remote common and C++ profile slices", async () => {
+  const generic = (await (await call("policy_resolve", { tags: ["software"], topics: [] })).json()).result.structuredContent;
+  assert.ok(generic.rules.find((rule) => rule.rule_id === "owner.latest").statement.includes("theoretical advantage"));
+  assert.ok(!generic.rules.some((rule) => rule.rule_id === "owner.cpp_modules"));
+  const cpp = (await (await call("policy_resolve", { tags: ["software", "cpp"], topics: [] })).json()).result.structuredContent;
+  const rule = cpp.rules.find((entry) => entry.rule_id === "owner.cpp_modules");
+  assert.ok(rule.details.includes("export module module_name;"));
+  assert.ok(rule.details.includes("module module_name;"));
+});
