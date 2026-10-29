@@ -21,7 +21,9 @@ jobs:
           test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$base"
           destination="$RUNNER_TEMP/apg_owner_amendment"
           git worktree add --detach "$destination" "$base"
-          python .delivery/apply_policy_amendment.py "$destination"
+          # The version edit preserves file length and can share checkout's
+          # timestamp second. Do not cache imported pre-amendment bytecode.
+          python -B .delivery/apply_policy_amendment.py "$destination"
           cd "$destination"
           python -c 'from tools.package import source_files; from policy_core.common import byte_digest,digest; actual=digest({name:byte_digest(body) for name,body in source_files().items()}); print(actual); assert actual == "b632697b6bcd33fb9f17aba5467b3a58b22f2ec8f4f2fce468846f8eb8cb154f", "Source differs from locally verified amendment"'
           python tools/verify.py
