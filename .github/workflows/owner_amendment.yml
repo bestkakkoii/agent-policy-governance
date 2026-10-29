@@ -1,0 +1,33 @@
+name: owner_policy_amendment
+on:
+  push:
+    branches: [owner_policy_amendment_delivery]
+permissions:
+  contents: read
+jobs:
+  prepare_verified_amendment:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          fetch-depth: 0
+      - name: Apply exact owner-authorized amendment to isolated baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=bc385ab58256c9dfdfcbcc00677dfe932152dfc8
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$base"
+          destination="$RUNNER_TEMP/apg_owner_amendment"
+          git worktree add --detach "$destination" "$base"
+          python .delivery/apply_policy_amendment.py "$destination"
+          cd "$destination"
+          python -c 'from tools.package import source_files; from policy_core.common import byte_digest,digest; actual=digest({name:byte_digest(body) for name,body in source_files().items()}); print(actual); assert actual == "b632697b6bcd33fb9f17aba5467b3a58b22f2ec8f4f2fce468846f8eb8cb154f", "Source differs from locally verified amendment"'
+          python tools/verify.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add --all
+          git commit -m 'feat: require C++ module exports and admit theory-backed latest technologies'
+          git push origin HEAD:refs/heads/owner_policy_amendment
+          echo "Validated amendment commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
