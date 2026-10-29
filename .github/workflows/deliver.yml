@@ -42,6 +42,9 @@ jobs:
           git worktree add --detach "$destination" "$base"
           git -C "$destination" rm -r --ignore-unmatch .
           python .delivery/hydrate.py "$destination"
+          # The Actions token cannot change workflow definitions. Publish that
+          # one file separately through the owner's authorized connector.
+          git -C "$destination" restore --source="$base" --staged --worktree .github/workflows/verify.yml
           git -C "$destination" add --all
           git -C "$destination" commit -m 'feat: installable policy governance with verified native adapters and MCP preview'
           git -C "$destination" push origin HEAD:refs/heads/main
