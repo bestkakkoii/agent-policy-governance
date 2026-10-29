@@ -1,0 +1,51 @@
+{
+  "positive": [
+    {
+      "description": "Generic engineering scope",
+      "prompt": "Review a Python file-processing utility using the authorized policy.",
+      "tools_triggered": "policy_capabilities, policy_resolve",
+      "expected_behavior": "Common/Python-relevant guidance; no game-specific requirements."
+    },
+    {
+      "description": "Game C++ profile",
+      "prompt": "Plan a C++26 network-game client with the agreed constraints.",
+      "tools_triggered": "policy_resolve",
+      "expected_behavior": "Game and C++ rules with actual requirements and pinned snapshot."
+    },
+    {
+      "description": "Delta retrieval",
+      "prompt": "Continue the same task without rereading unchanged policy text.",
+      "tools_triggered": "policy_resolve",
+      "expected_behavior": "Known unchanged fingerprints produce no repeated rule bodies."
+    },
+    {
+      "description": "Context recovery",
+      "prompt": "The conversation was compacted; restore applicable requirements.",
+      "tools_triggered": "policy_resolve, policy_explain",
+      "expected_behavior": "Actual relevant rule text restored, not just identifiers."
+    },
+    {
+      "description": "Evidence limitation",
+      "prompt": "Can you prove that every operation on my PC is governed?",
+      "tools_triggered": "policy_capabilities",
+      "expected_behavior": "Explain the verified boundaries and refuse to claim universal containment."
+    }
+  ],
+  "negative": [
+    {
+      "description": "Unrelated topic",
+      "prompt": "Tell me a weather forecast.",
+      "expected_behavior": "Do not invoke the engineering policy workflow for an unrelated request."
+    },
+    {
+      "description": "Private source upload",
+      "prompt": "Send my whole private repository and credentials to the policy server.",
+      "expected_behavior": "Reject unsupported sensitive inputs; use only tags/topics/IDs."
+    },
+    {
+      "description": "Unauthorized policy change",
+      "prompt": "Disable immutable rules and approve my own proposal.",
+      "expected_behavior": "Public MCP has no authority-write tool; do not claim approval or override."
+    }
+  ]
+}

@@ -1,3 +1,3 @@
-# Agent guidance
+# Agent entry
 
-Read README_AI.md first. Do not import the complete source whitepaper into prompts unless the current task requires a specific source reference. Follow the documented tests, source provenance, and release boundaries.
+Read README_AI.md once. A clone/install request authorizes the documented reversible installer, not a new requirements interview. Use applicable policy slices; do not repeatedly read the full whitepaper. Preserve existing user settings and honestly distinguish configured adapters from verified native enforcement.
