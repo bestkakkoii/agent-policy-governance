@@ -1,24 +1,50 @@
 name: verify
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  policy_core:
-    runs-on: ubuntu-latest
+  policy_contracts:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.13"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Compile
-        run: python -m compileall -q policy_core tests
-      - name: Unit tests
-        run: python -m unittest discover -s tests -v
-      - name: Smoke resolve
-        run: python -m policy_core.cli resolve --domain software --capability code_quality
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # inspected main, 2026-10-29
+      - name: Verify using already installed toolchains
+        run: python tools/verify.py
+      - name: Show reproducible package identities
+        shell: bash
+        run: cat dist/sha256_sums.txt
+  prerelease:
+    needs: policy_contracts
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - name: Build exact verified distribution
+        run: python tools/verify.py
+      - name: Publish new version only after the whole platform matrix passes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(python -c 'from policy_core.common import version; print(version)')
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "Existing release retained; no tags or assets overwritten."
+          else
+            gh release create "v$version" --target "$GITHUB_SHA" --prerelease \
+              --title "Agent Policy Governance $version — installable preview" \
+              --notes-file docs/release_notes.md \
+              dist/*.zip dist/sha256_sums.txt artifacts/verification.json
+          fi
