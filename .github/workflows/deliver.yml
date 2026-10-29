@@ -1,0 +1,49 @@
+name: verified_source_delivery
+on:
+  push:
+    branches: [delivery_bootstrap]
+permissions:
+  contents: read
+jobs:
+  verify_source:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          persist-credentials: false
+      - name: Verify and materialize exact source
+        run: python .delivery/hydrate.py _source
+      - name: Verify on actual operating system
+        working-directory: _source
+        run: python tools/verify.py
+  publish_source:
+    needs: verify_source
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        with:
+          fetch-depth: 0
+      - name: Publish verified source without overwriting concurrent owner changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=85969a825514479f3753d1267b392f481b7d6a16
+          remote=$(git ls-remote origin refs/heads/main | cut -f1)
+          test "$remote" = "$base"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          destination="$RUNNER_TEMP/apg_publish"
+          git worktree add --detach "$destination" "$base"
+          git -C "$destination" rm -r --ignore-unmatch .
+          python .delivery/hydrate.py "$destination"
+          git -C "$destination" add --all
+          git -C "$destination" commit -m 'feat: installable policy governance with verified native adapters and MCP preview'
+          git -C "$destination" push origin HEAD:refs/heads/main
+          echo "Published commit: $(git -C "$destination" rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Source transfer SHA-256: 6e18075252ed28ed3487abd2becf5a3af14684f33987f45ff8cd7b95bcfd4695' >> "$GITHUB_STEP_SUMMARY"
