@@ -17,16 +17,25 @@ known_file_names = {
 }
 source_suffixes = {".py", ".rs", ".go", ".c", ".h", ".hpp", ".cpp", ".cppm", ".ixx", ".cs", ".java", ".ts", ".tsx", ".js", ".mjs", ".json", ".md"}
 write_tools = {"write", "edit", "multiedit", "apply_patch", "write_file", "replace_in_file"}
+max_text_bytes = 2 * 1024 * 1024
+patch_begin = "*** Begin Patch"
+patch_end = "*** End Patch"
+# Codex accepts apply_patch as a direct tool, an argv command and a shell heredoc (optionally after `cd <dir> &&`).
+apply_patch_word = re.compile(r"(?<![\w.-])(?:apply_patch|applypatch)(?![\w.-])")
+heredoc_workdir = re.compile(r"^\s*cd\s+(?:\"([^\"]+)\"|'([^']+)'|(\S+))\s*&&")
 
 
 def validate_new_path(project: Path, target: Path) -> list[dict[str, Any]]:
+    """Check only components this write creates; existing ancestors are prior project decisions, not new names."""
     results = []
     try:
         relative = target.relative_to(project)
     except ValueError:
         return [{"rule_id": "owner.naming", "status": "not_checked", "reason": "outside_project_ownership"}]
+    current = project
     for part in relative.parts:
-        if part in known_file_names or part.startswith("."):
+        current = current / part
+        if current.exists() or part in known_file_names or part.startswith("."):
             continue
         stem = part.split(".")[0]
         if not re.fullmatch(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*", stem):
@@ -48,6 +57,161 @@ def validate_text(path: Path, text: str) -> list[dict[str, Any]]:
     except (SyntaxError, ValueError, policy_error) as error:
         results.append({"rule_id": "owner.static_quality", "status": "failed", "reason": str(error)})
     return results
+
+
+def tool_arguments(value: Any) -> dict[str, Any]:
+    """Codex declares tool_input as arbitrary JSON; normalize raw patch text and argv arrays to an object."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        return {"input": value}
+    if isinstance(value, list):
+        return {"command": value}
+    if value is None:
+        return {}
+    raise policy_error("tool_input_shape", "Tool arguments must be an object, argv array, raw patch or null", type=type(value).__name__)
+
+
+def read_existing_text(path: Path) -> tuple[str | None, str | None]:
+    """Return (text, reason): bounded strict UTF-8 preimage, or the cause it cannot serve as a check baseline."""
+    if not path.is_file():
+        return None, None
+    try:
+        if path.stat().st_size > max_text_bytes:
+            return None, "original_exceeds_checker_limit"
+        return path.read_bytes().decode("utf-8-sig"), None
+    except UnicodeDecodeError as error:
+        return None, f"original_not_utf8: {error.reason} at byte {error.start}"
+    except OSError as error:
+        # The host performs (and reports) the real write; an unreadable baseline only limits what can be verified.
+        return None, f"original_unreadable: {type(error).__name__}: {error}"
+
+
+def bounded_postimage(text: str | None, reason: str | None) -> tuple[str | None, str | None]:
+    """Derived postimages above the checker limit are reported as unchecked instead of denying a legitimate edit."""
+    if text is not None and len(text.encode("utf-8")) > max_text_bytes:
+        return None, "postimage_exceeds_checker_limit"
+    return text, reason
+
+
+def apply_patch_bodies(tool: str, arguments: Any) -> list[tuple[str, str | None]]:
+    """Collect (patch, workdir) from direct, argv and heredoc invocations; file-content fields are never parsed."""
+    bodies: list[tuple[str, str | None]] = []
+
+    def take(text: str, invoked: bool) -> None:
+        start = 0
+        while (index := text.find(patch_begin, start)) >= 0:
+            start = index + len(patch_begin)
+            prefix = text[:index]
+            command_line = prefix.rstrip().rsplit("\n", 1)[-1]
+            if not (invoked or (tool == "apply_patch" and not prefix.strip()) or apply_patch_word.search(command_line)):
+                continue
+            end = text.find(patch_end, index)
+            workdir = heredoc_workdir.match(command_line) if apply_patch_word.search(command_line) else None
+            bodies.append((text[index:] if end < 0 else text[index:end + len(patch_end)],
+                           next((group for group in workdir.groups() if group), None) if workdir else None))
+
+    def walk(value: Any, depth: int) -> None:
+        if depth > 8:
+            return
+        if isinstance(value, str):
+            take(value, False)
+        elif isinstance(value, list):
+            invoked = bool(value) and isinstance(value[0], str) and apply_patch_word.fullmatch(Path(value[0]).name) is not None
+            for item in value[1:] if invoked else value:
+                if invoked and isinstance(item, str):
+                    take(item, True)
+                else:
+                    walk(item, depth + 1)
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item, depth + 1)
+
+    walk(arguments, 0)
+    return bodies
+
+
+def parse_apply_patch(text: str) -> list[dict[str, Any]]:
+    """Parse the Codex apply_patch grammar into add/delete/update operations with update hunks."""
+    operations: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    hunk: dict[str, Any] | None = None
+    for raw in text.split("\n"):
+        line = raw[:-1] if raw.endswith("\r") else raw
+        header = next((kind for kind in ("Add", "Delete", "Update") if line.startswith(f"*** {kind} File: ")), None)
+        if header:
+            current = {"kind": header.casefold(), "path": line.split(": ", 1)[1].strip(), "lines": [], "move_to": None, "hunks": []}
+            operations.append(current)
+            hunk = None
+        elif current is None or line.startswith(patch_end):
+            current = None
+        elif current["kind"] == "add":
+            if line.startswith("+"):
+                current["lines"].append(line[1:])
+        elif current["kind"] == "update":
+            if line.startswith("*** Move to: "):
+                current["move_to"] = line.split(": ", 1)[1].strip()
+            elif line.startswith("*** End of File"):
+                if hunk is not None:
+                    hunk["end_of_file"] = True
+            elif line.startswith("@@"):
+                hunk = {"context": line[2:].strip() or None, "old": [], "new": [], "end_of_file": False}
+                current["hunks"].append(hunk)
+            elif line[:1] in {"+", "-", " ", ""}:
+                if hunk is None:
+                    # The first hunk may omit its @@ header.
+                    hunk = {"context": None, "old": [], "new": [], "end_of_file": False}
+                    current["hunks"].append(hunk)
+                if line[:1] != "+":
+                    hunk["old"].append(line[1:])
+                if line[:1] != "-":
+                    hunk["new"].append(line[1:])
+    return operations
+
+
+def seek_lines(lines: list[str], pattern: list[str], start: int, end_of_file: bool) -> int | None:
+    """Mirror Codex apply_patch matching order (exact, trailing, surrounding whitespace); no fuzzy Unicode pass."""
+    if not pattern:
+        return start
+    if len(pattern) > len(lines):
+        return None
+    first = len(lines) - len(pattern) if end_of_file else start
+    for normalize in (str, str.rstrip, str.strip):
+        wanted = [normalize(line) for line in pattern]
+        for index in range(first, len(lines) - len(pattern) + 1):
+            if all(normalize(lines[index + offset]) == wanted[offset] for offset in range(len(pattern))):
+                return index
+    return None
+
+
+def apply_update_hunks(original: str, hunks: list[dict[str, Any]]) -> str | None:
+    """Reconstruct the Codex postimage; None means it cannot be derived without guessing."""
+    lines = original.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    replacements: list[tuple[int, int, list[str]]] = []
+    index = 0
+    for hunk in hunks:
+        if hunk["context"] is not None:
+            found = seek_lines(lines, [hunk["context"]], index, False)
+            if found is None:
+                return None
+            index = found + 1
+        old, new = hunk["old"], hunk["new"]
+        if not old:
+            replacements.append((len(lines) - 1 if lines and lines[-1] == "" else len(lines), 0, new))
+            continue
+        found = seek_lines(lines, old, index, hunk["end_of_file"])
+        if found is None and old[-1] == "":
+            old, new = old[:-1], new[:-1] if new and new[-1] == "" else new
+            found = seek_lines(lines, old, index, hunk["end_of_file"])
+        if found is None:
+            return None
+        replacements.append((found, len(old), new))
+        index = found + len(old)
+    for start, length, new in sorted(replacements, key=lambda item: item[0], reverse=True):
+        lines[start:start + length] = new
+    return "\n".join(lines) + "\n"
 
 
 class policy_runtime:
@@ -185,36 +349,70 @@ class policy_runtime:
         require(not missing, "unknown_rule", "Unknown rule IDs", missing=missing)
         return {"ok": True, "snapshot_id": snapshot, "rules": [by_id[key] for key in rule_ids]}
 
-    def gate(self, project: Path, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        project = find_project(project)
+    def gate(self, project: Path, tool: str, arguments: Any) -> dict[str, Any]:
+        arguments = tool_arguments(arguments)
+        # Relative tool paths are relative to the host working directory, which may be below the project root.
+        base = Path(project).expanduser().resolve()
+        base = base.parent if base.is_file() else base
+        project = find_project(base)
         normalized = tool.casefold().split(".")[-1]
         checks: list[dict[str, Any]] = []
-        targets: list[tuple[Path, str | None]] = []
-        if normalized in write_tools:
+        # Each target: path, proposed postimage, preimage baseline, whether new names are created, skip reason.
+        targets: list[dict[str, Any]] = []
+        if normalized in write_tools and normalized != "apply_patch":
             raw_path = arguments.get("file_path", arguments.get("filePath", arguments.get("path")))
             content = arguments.get("content")
             if isinstance(raw_path, str):
-                target = (project / raw_path).resolve()
+                target = (base / raw_path).resolve()
+                original, unreadable = read_existing_text(target)
                 if normalized == "edit" and target.is_file():
                     old, new = arguments.get("old_string", arguments.get("oldString")), arguments.get("new_string", arguments.get("newString"))
-                    if isinstance(old, str) and isinstance(new, str) and target.stat().st_size <= 2 * 1024 * 1024:
-                        original = target.read_text("utf-8-sig")
-                        if old and (original.count(old) == 1 or arguments.get("replace_all", arguments.get("replaceAll", False))):
-                            content = original.replace(old, new, -1 if arguments.get("replace_all", arguments.get("replaceAll", False)) else 1)
-                targets.append((target, content if isinstance(content, str) else None))
-            if normalized == "apply_patch":
-                patch = arguments.get("input", arguments.get("patch", arguments.get("command", "")))
-                if isinstance(patch, str):
-                    for name in re.findall(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", patch, re.MULTILINE):
-                        targets.append(((project / name).resolve(), None))
-        for target, content in targets:
-            if target == self.store.home or self.store.home in target.parents:
-                checks.append({"rule_id": "owner.scope", "status": "failed", "reason": "Do not directly edit the installed policy authority/state; use reviewed policy evolution."})
-            if not target.exists():
-                checks.extend(validate_new_path(project, target))
-            if content is not None and target.suffix in source_suffixes:
-                require(len(content.encode("utf-8")) <= 2 * 1024 * 1024, "tool_input_too_large", "Proposed source exceeds checker limit")
-                checks.extend(validate_text(target, content))
+                    replace_all = arguments.get("replace_all", arguments.get("replaceAll", False))
+                    if isinstance(old, str) and isinstance(new, str) and original is not None:
+                        if old and (original.count(old) == 1 or replace_all):
+                            content, unreadable = bounded_postimage(original.replace(old, new, -1 if replace_all else 1), unreadable)
+                targets.append({"path": target, "content": content if isinstance(content, str) else None, "original": original,
+                                "naming": True, "skipped": unreadable if normalized == "edit" else None})
+        # Write/Edit payloads are file data; only apply_patch and command-style tools can invoke a patch.
+        bodies = [] if normalized in write_tools - {"apply_patch"} else apply_patch_bodies(normalized, arguments)
+        for body, workdir in bodies:
+            directory = (base / workdir).resolve() if workdir else base
+            for operation in parse_apply_patch(body):
+                source = (directory / operation["path"]).resolve()
+                if operation["kind"] == "add":
+                    targets.append({"path": source, "content": "".join(line + "\n" for line in operation["lines"]),
+                                    "original": None, "naming": True, "skipped": None})
+                elif operation["kind"] == "delete":
+                    targets.append({"path": source, "content": None, "original": None, "naming": False, "skipped": None})
+                else:
+                    destination = (directory / operation["move_to"]).resolve() if operation["move_to"] else source
+                    original, unreadable = read_existing_text(source)
+                    postimage = apply_update_hunks(original, operation["hunks"]) if original is not None else None
+                    postimage, skipped = bounded_postimage(postimage, unreadable or ("patch_postimage_unavailable" if postimage is None else None))
+                    if destination != source:
+                        targets.append({"path": source, "content": None, "original": None, "naming": False, "skipped": None})
+                    targets.append({"path": destination, "content": postimage, "original": original, "naming": destination != source,
+                                    "skipped": skipped})
+        for target in targets:
+            path = target["path"]
+            display = str(path.relative_to(project)) if path.is_relative_to(project) else str(path)
+            if path == self.store.home or self.store.home in path.parents:
+                checks.append({"rule_id": "owner.scope", "status": "failed", "path": display,
+                               "reason": "Do not directly edit the installed policy authority/state; use reviewed policy evolution."})
+            if target["naming"] and not path.exists():
+                checks.extend(validate_new_path(project, path))
+            if path.suffix not in source_suffixes:
+                continue
+            if target["skipped"]:
+                checks.append({"rule_id": "owner.static_quality", "status": "not_checked", "path": display, "reason": target["skipped"]})
+            if target["content"] is None:
+                continue
+            require(len(target["content"].encode("utf-8")) <= max_text_bytes, "tool_input_too_large", "Proposed source exceeds checker limit")
+            failures = [{**failure, "path": display} for failure in validate_text(path, target["content"])]
+            if failures and target["original"] is not None and validate_text(path, target["original"]):
+                # Only regressions are denied; a preimage that already fails (for example JSON with comments) stays editable.
+                failures = [{**failure, "status": "not_checked", "reason": "pre_existing_failure: " + failure["reason"]} for failure in failures]
+            checks.extend(failures)
         with self.store.connection() as connection:
             key = self.project_key(project)
             exceptions = [value for _, value in self.store.items(connection, "exception") if value["project_key"] == key]
@@ -330,11 +528,7 @@ class policy_runtime:
                 return {"hookSpecificOutput": {"hookEventName": kind, "additionalContext": packet["context"] + update_notice}}
             return {}
         if kind == "PreToolUse":
-            arguments = event.get("tool_input", {})
-            # Codex custom tools can carry a raw apply_patch string.
-            if isinstance(arguments, str):
-                arguments = {"input": arguments}
-            require(isinstance(arguments, dict), "tool_input_shape", "Tool arguments must be an object or raw patch")
+            arguments = tool_arguments(event.get("tool_input", {}))
             tool = event.get("tool_name", "")
             require(isinstance(tool, str), "tool_name_shape", "Tool name must be text")
             packet = self.context(project, session, tool, begin=True)
@@ -342,8 +536,11 @@ class policy_runtime:
             output: dict[str, Any] = {"hookEventName": kind}
             if not decision["ok"]:
                 output.update(permissionDecision="deny", permissionDecisionReason=decision["reason"])
-            if packet["context"]:
-                output["additionalContext"] = packet["context"]
+            unchecked = [f"{check['path']}: {check['reason']}" for check in decision["checks"]
+                         if check["status"] == "not_checked" and check["rule_id"] == "owner.static_quality"]
+            notice = "APG content check not performed (not verified): " + "; ".join(unchecked[:4]) if unchecked else ""
+            if packet["context"] or notice:
+                output["additionalContext"] = "\n".join(text for text in (packet["context"], notice) if text)
             return {"hookSpecificOutput": output} if len(output) > 1 else {}
         if kind in {"PreCompact", "PostToolUse"}:
             return {}

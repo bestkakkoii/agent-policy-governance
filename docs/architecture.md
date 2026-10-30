@@ -34,7 +34,8 @@ The first confirmed profile is an agent decision based on available project fact
 | No silent self-approval or stale overwrite | Independent actor, evidence, immutable-rule, high-risk and CAS tests |
 | Installation preserves prior content | Repeat install, uninstall, edited config, injected write failure and journal conflict tests |
 | Local outage does not lose accepted rules | Invalid service/offline sync tests |
-| Supported direct writes can be denied | Native JSON contracts and OpenCode before-tool rejection tests |
+| Supported direct writes can be denied | Native JSON contracts, Codex apply_patch direct/argv/heredoc, move/delete, cwd-relative and postimage-regression tests, OpenCode before-tool rejection tests |
+| New-name checks spare existing paths | Existing-ancestor, new-component and solution-reference profile tests |
 | MCP metadata is bounded and read-only | Protocol, origin/header/body/field, snapshot and cross-language selector tests |
 | Packages deterministic and private-source-free | Reproducible ZIP and package-content tests |
 

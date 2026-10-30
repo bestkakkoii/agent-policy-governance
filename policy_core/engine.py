@@ -80,11 +80,34 @@ def find_project(path: Path) -> Path:
     return path
 
 
+solution_project_tags = {".vcxproj": "cpp", ".csproj": "csharp"}
+# .sln: Project("{type}") = "name", "relative\path.ext", "{id}"; .slnx: <Project Path="relative/path.ext" />
+solution_reference = re.compile(r'^\s*Project\("\{[0-9A-Fa-f-]+\}"\)\s*=\s*"[^"]*"\s*,\s*"([^"]+)"', re.MULTILINE)
+solutionx_reference = re.compile(r'<Project\b[^>]*\bPath="([^"]+)"', re.IGNORECASE)
+
+
+def solution_tags(path: Path) -> tuple[set[str], str | None]:
+    """A solution names no language itself; read only its bounded project-reference list."""
+    try:
+        if path.stat().st_size > 1024 * 1024:
+            return set(), f"{path.name}: solution exceeds 1 MiB; project references not read"
+        text = path.read_bytes().decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        return set(), f"{path.name}: not UTF-8 ({error.reason} at byte {error.start}); project references not read"
+    except OSError as error:
+        # Profile discovery must not block every hook; the cause is retained in profile notes.
+        return set(), f"{path.name}: unreadable ({type(error).__name__}: {error}); project references not read"
+    pattern = solutionx_reference if path.suffix.casefold() == ".slnx" else solution_reference
+    references = {Path(reference.replace("\\", "/")).suffix.casefold() for reference in pattern.findall(text)}
+    return {solution_project_tags[suffix] for suffix in references if suffix in solution_project_tags}, None
+
+
 def discover_profile(project: Path) -> dict[str, Any]:
     """Do not run project code or recursively scan user files to discover a profile."""
     project = find_project(project)
     tags = {"software"}
     evidence = []
+    notes = []
     markers = {
         "Cargo.toml": "rust", "go.mod": "go", "pyproject.toml": "python",
         "requirements.txt": "python", "CMakeLists.txt": "cpp", "pom.xml": "java",
@@ -97,17 +120,24 @@ def discover_profile(project: Path) -> dict[str, Any]:
             evidence.append(name)
     entries = sorted(project.iterdir(), key=lambda path: path.name)[:512]
     extension_tags = {".py": "python", ".rs": "rust", ".go": "go", ".csproj": "csharp",
-                      ".sln": "csharp", ".cpp": "cpp", ".cppm": "cpp", ".ixx": "cpp", ".mpp": "cpp",
+                      ".cpp": "cpp", ".cppm": "cpp", ".ixx": "cpp", ".mpp": "cpp",
                       ".cc": "cpp", ".cxx": "cpp", ".vcxproj": "cpp", ".java": "java", ".uproject": "game"}
     for path in entries:
-        if path.is_file() and not path.is_symlink() and path.suffix in extension_tags:
+        if not path.is_file() or path.is_symlink():
+            continue
+        if path.suffix.casefold() in {".sln", ".slnx"}:
+            found, note = solution_tags(path)
+            tags.update(found)
+            evidence.extend([path.name] if found else [])
+            notes.extend([note] if note else [])
+        elif path.suffix in extension_tags:
             tags.add(extension_tags[path.suffix])
             evidence.append(path.name)
     if (project / "src-tauri/tauri.conf.json").is_file():
         tags.update({"desktop_gui", "rust"})
         evidence.append("src-tauri/tauri.conf.json")
     # Project type is never inferred from an incidental mention in a README.
-    return {"project": str(project), "tags": sorted(tags), "evidence": sorted(set(evidence)),
+    return {"project": str(project), "tags": sorted(tags), "evidence": sorted(set(evidence)), "notes": notes,
             "confirmation": "detected", "confirmed_by": None}
 
 
