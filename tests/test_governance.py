@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import patch
 
 from policy_core.common import canonical, decode_json, digest, policy_error, write_json
 from policy_core.engine import discover_profile, infer_topics, load_catalog, select_rules, validate_catalog
@@ -174,6 +175,133 @@ class governance_tests(unittest.TestCase):
     def test_direct_state_tampering_is_denied(self) -> None:
         self.assertFalse(self.runtime.gate(self.project, "Write", {"file_path": str(self.home / "state.sqlite3"), "content": "erase"})["ok"])
 
+    def failed_paths(self, result: dict) -> list[str]:
+        return [check["path"].replace("\\", "/") for check in result["checks"] if check["status"] == "failed"]
+
+    def test_existing_ancestors_are_not_renamed_but_new_components_are_checked(self) -> None:
+        (self.project / "LegacyModule").mkdir()
+        self.assertTrue(self.runtime.gate(self.project, "Write", {"file_path": "LegacyModule/new_helper.py", "content": "x = 1\n"})["ok"])
+        self.assertEqual(self.failed_paths(self.runtime.gate(self.project, "Write", {"file_path": "LegacyModule/NewHelper.py", "content": "x = 1\n"})),
+                         ["LegacyModule/NewHelper.py"])
+        self.assertEqual(self.failed_paths(self.runtime.gate(self.project, "Write", {"file_path": "NewModule/new_helper.py", "content": "x = 1\n"})),
+                         ["NewModule/new_helper.py"])
+
+    def test_codex_apply_patch_direct_argv_and_heredoc_forms_are_gated(self) -> None:
+        invalid = "*** Begin Patch\n*** Add File: bad_data.json\n+{invalid\n*** End Patch\n"
+        for tool, arguments in [("apply_patch", {"input": invalid}), ("shell", {"command": ["apply_patch", invalid]}),
+                                ("Bash", {"command": "cd sub && apply_patch <<'EOF'\n" + invalid + "EOF\n"})]:
+            with self.subTest(tool=tool):
+                (self.project / "sub").mkdir(exist_ok=True)
+                result = self.runtime.gate(self.project, tool, arguments)
+                self.assertEqual(result["decision"], "deny")
+                self.assertTrue(all(check["rule_id"] == "owner.static_quality" for check in result["checks"] if check["status"] == "failed"))
+        # The heredoc `cd sub &&` prefix moves the patch root, so the checked path is under sub.
+        heredoc = self.runtime.gate(self.project, "Bash", {"command": "cd sub && apply_patch <<'EOF'\n" + invalid + "EOF\n"})
+        self.assertEqual(self.failed_paths(heredoc), ["sub/bad_data.json"])
+        # Shell text that merely contains a patch is not an apply_patch invocation and is not misreported as checked.
+        writer = self.runtime.gate(self.project, "Bash", {"command": "cat > notes.md <<'EOF'\n" + invalid + "EOF\n"})
+        self.assertEqual((writer["decision"], writer["coverage"]), ("continue", "unobserved_or_nonwrite_tool"))
+        # File content fields are data, not commands, even when they document a heredoc invocation.
+        documentation = "apply_patch <<'EOF'\n" + invalid + "EOF\n"
+        self.assertTrue(self.runtime.gate(self.project, "Write", {"file_path": "example_patch.md", "content": documentation})["ok"])
+
+    def test_apply_patch_add_move_and_delete_semantics(self) -> None:
+        (self.project / "old_name.py").write_text("value = 1\n", encoding="utf-8")
+        valid_add = "*** Begin Patch\n*** Add File: tools/new_tool.json\n+{\"ok\": true}\n*** End Patch\n"
+        self.assertTrue(self.runtime.gate(self.project, "apply_patch", {"input": valid_add})["ok"])
+        move = "*** Begin Patch\n*** Update File: old_name.py\n*** Move to: BadTarget.py\n@@\n-value = 1\n+value = 2\n*** End Patch\n"
+        self.assertEqual(self.failed_paths(self.runtime.gate(self.project, "apply_patch", {"input": move})), ["BadTarget.py"])
+        delete = "*** Begin Patch\n*** Delete File: LegacyName.txt\n*** End Patch\n"
+        self.assertTrue(self.runtime.gate(self.project, "apply_patch", {"input": delete})["ok"])
+        protected = f"*** Begin Patch\n*** Delete File: {self.home / 'state.sqlite3'}\n*** End Patch\n"
+        self.assertFalse(self.runtime.gate(self.project, "apply_patch", {"input": protected})["ok"])
+
+    def test_update_postimage_denies_regressions_only(self) -> None:
+        (self.project / "settings.json").write_text('{\n  "a": 1\n}\n', encoding="utf-8")
+        (self.project / "loose.json").write_text('{"a": 1,}\n', encoding="utf-8")
+        update = lambda name, old, new: {"input": f"*** Begin Patch\n*** Update File: {name}\n@@\n-{old}\n+{new}\n*** End Patch\n"}
+        self.assertEqual(self.runtime.gate(self.project, "apply_patch", update("settings.json", '  "a": 1', '  "a": '))["decision"], "deny")
+        self.assertTrue(self.runtime.gate(self.project, "apply_patch", update("settings.json", '  "a": 1', '  "a": 2'))["ok"])
+        retained = self.runtime.gate(self.project, "apply_patch", update("loose.json", '{"a": 1,}', '{"a": 2,}'))
+        self.assertTrue(retained["ok"])
+        self.assertTrue(any(check["status"] == "not_checked" and check["reason"].startswith("pre_existing_failure") for check in retained["checks"]))
+        unmatched = self.runtime.gate(self.project, "apply_patch", update("settings.json", "absent line", "x"))
+        self.assertEqual([(check["status"], check["reason"]) for check in unmatched["checks"]], [("not_checked", "patch_postimage_unavailable")])
+        edit = self.runtime.gate(self.project, "Edit", {"file_path": str(self.project / "loose.json"), "old_string": "1", "new_string": "2"})
+        self.assertTrue(edit["ok"])
+
+    def test_relative_patch_paths_resolve_from_host_cwd(self) -> None:
+        workdir = self.project / "service"
+        workdir.mkdir()
+        (workdir / "config.json").write_text('{"port": 1}\n', encoding="utf-8")
+        patch = "*** Begin Patch\n*** Update File: config.json\n@@\n-{\"port\": 1}\n+{\"port\": }\n*** End Patch\n"
+        self.assertEqual(self.failed_paths(self.runtime.gate(workdir, "apply_patch", {"input": patch})), ["service/config.json"])
+
+    def test_non_utf8_preimage_is_reported_not_crashed(self) -> None:
+        legacy = self.project / "legacy.h"
+        legacy.write_bytes("// 測試\n".encode("big5"))
+        for tool, arguments in [("Edit", {"file_path": str(legacy), "old_string": "a", "new_string": "b"}),
+                                ("apply_patch", {"input": "*** Begin Patch\n*** Update File: legacy.h\n@@\n-x\n+y\n*** End Patch\n"})]:
+            with self.subTest(tool=tool):
+                result = self.runtime.gate(self.project, tool, arguments)
+                self.assertTrue(result["ok"])
+                self.assertTrue(any(check["status"] == "not_checked" and check["reason"].startswith("original_not_utf8") for check in result["checks"]))
+
+    def test_unverifiable_baselines_are_reported_without_denying(self) -> None:
+        large = self.project / "large_data.json"
+        large.write_text('{\n  "data": "' + "a" * (2 * 1024 * 1024 - 64) + '",\n  "x": 1\n}\n', encoding="utf-8")
+        grow = "*** Begin Patch\n*** Update File: large_data.json\n@@\n-  \"x\": 1\n+  \"x\": \"" + "b" * 256 + "\"\n*** End Patch\n"
+        result = self.runtime.gate(self.project, "apply_patch", {"input": grow})
+        self.assertTrue(result["ok"])
+        self.assertIn(("not_checked", "postimage_exceeds_checker_limit"), [(check["status"], check["reason"]) for check in result["checks"]])
+        locked = self.project / "locked.json"
+        locked.write_text('{"a": 1}\n', encoding="utf-8")
+        with patch.object(Path, "read_bytes", side_effect=PermissionError(13, "Access is denied")):
+            result = self.runtime.gate(self.project, "Edit", {"file_path": str(locked), "old_string": "1", "new_string": "2"})
+        self.assertTrue(result["ok"])
+        self.assertTrue(any(check["reason"].startswith("original_unreadable: PermissionError") for check in result["checks"]))
+
+    def test_gate_normalizes_tool_input_shapes_and_rejects_scalars(self) -> None:
+        invalid = "*** Begin Patch\n*** Add File: bad_data.json\n+{invalid\n*** End Patch\n"
+        self.assertEqual(self.runtime.gate(self.project, "shell", ["apply_patch", invalid])["decision"], "deny")
+        self.assertEqual(self.runtime.gate(self.project, "apply_patch", invalid)["decision"], "deny")
+        self.assertTrue(self.runtime.gate(self.project, "Read", None)["ok"])
+        with self.assertRaisesRegex(policy_error, "argv array"):
+            self.runtime.gate(self.project, "shell", 7)
+
+    def test_solution_references_decide_language(self) -> None:
+        line = 'Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "{name}", "{path}", "{{00000000-0000-0000-0000-000000000000}}"\nEndProject\n'
+        (self.project / "native_app.sln").write_text("﻿" + line.replace("{name}", "app").replace("{path}", r"app\app.vcxproj"), encoding="utf-8")
+        profile = discover_profile(self.project)
+        self.assertIn("cpp", profile["tags"])
+        self.assertNotIn("csharp", profile["tags"])
+        (self.project / "native_app.sln").write_text(line.replace("{name}", "tool").replace("{path}", r"tool\tool.csproj"), encoding="utf-8")
+        self.assertEqual(discover_profile(self.project)["tags"], ["csharp", "software"])
+        (self.project / "native_app.sln").write_text("Microsoft Visual Studio Solution File, Format Version 12.00\n", encoding="utf-8")
+        self.assertEqual(discover_profile(self.project)["tags"], ["software"])
+        (self.project / "native_app.sln").unlink()
+        (self.project / "modern_app.slnx").write_text('<Solution>\n  <Project Path="lib/lib.vcxproj" />\n</Solution>\n', encoding="utf-8")
+        self.assertIn("cpp", discover_profile(self.project)["tags"])
+        (self.project / "modern_app.slnx").write_bytes(b"\xff\xfe<\x00")
+        damaged = discover_profile(self.project)
+        self.assertEqual(damaged["tags"], ["software"])
+        self.assertTrue(any("not UTF-8" in note for note in damaged["notes"]))
+
+    def test_hook_accepts_argv_tool_input_and_reports_unchecked_content(self) -> None:
+        invalid = "*** Begin Patch\n*** Add File: BadName.json\n+{invalid\n*** End Patch\n"
+        event = {"hook_event_name": "PreToolUse", "session_id": "argv_session", "cwd": str(self.project), "tool_name": "shell",
+                 "tool_input": ["apply_patch", invalid]}
+        output = self.runtime.hook("codex", event)["hookSpecificOutput"]
+        self.assertEqual(output["permissionDecision"], "deny")
+        self.assertIn("snake_case", output["permissionDecisionReason"])
+        self.assertIn("Expecting property name", output["permissionDecisionReason"])
+        (self.project / "loose.json").write_text('{"a": 1,}\n', encoding="utf-8")
+        retained = {**event, "tool_input": {"command": ["apply_patch", "*** Begin Patch\n*** Update File: loose.json\n@@\n-{\"a\": 1,}\n+{\"a\": 2,}\n*** End Patch\n"]}}
+        output = self.runtime.hook("codex", retained)["hookSpecificOutput"]
+        self.assertNotIn("permissionDecision", output)
+        self.assertIn("not verified", output["additionalContext"])
+        self.assertEqual(self.runtime.hook("codex", {**event, "tool_input": None}), {})
+
     def test_safe_repair_preserves_number_lexemes_and_string_spaces(self) -> None:
         path = self.project / "data.json"
         path.write_text('{ "value" : 9007199254740993.0, "zero": -0, "text": "a b\\\\c" }', encoding="utf-8")
@@ -284,6 +412,17 @@ class governance_tests(unittest.TestCase):
                                 input=json.dumps(event), capture_output=True, text=True, timeout=15, check=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_cli_codex_argv_patch_round_trip(self) -> None:
+        patch = "*** Begin Patch\n*** Add File: valid_name.json\n+{invalid\n*** End Patch\n"
+        event = {"session_id": "codex_host", "cwd": str(self.project), "hook_event_name": "PreToolUse", "tool_name": "shell",
+                 "tool_use_id": "call_1", "turn_id": "turn_1", "tool_input": {"command": ["apply_patch", patch]}}
+        result = subprocess.run([sys.executable, str(root / "apg.py"), "--home", str(self.home), "hook", "codex"],
+                                input=json.dumps(event), capture_output=True, text=True, timeout=15, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)["hookSpecificOutput"]
+        self.assertEqual(output["permissionDecision"], "deny")
+        self.assertNotIn("Governance validation failed", output["permissionDecisionReason"])
 
     def test_read_only_check_reports_incomplete_semantic_coverage(self) -> None:
         (self.project / "example.py").write_text("print('ok')\n", encoding="utf-8")
